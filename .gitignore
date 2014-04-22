@@ -1,0 +1,6 @@
+# Ignore the build and bin dirs
+/bin/
+/build/
+
+# Ignore object files
+*.o
