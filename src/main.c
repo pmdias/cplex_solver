@@ -1,9 +1,16 @@
 #include <ilcplex/cplex.h>
 
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+
+/*** Constants Definitions ***/
+#define SOLVER_NETWORK_SIMPLEX	1
+#define SOLVER_LP_SIMPLEX		2
+#define SOLVER_HYBRID_SIMPLEX	3
+
 /*** Forward Declarations ***/
 static void free_and_null(void **);
-
-
 
 /*** Main Routine ***/
 int
@@ -14,6 +21,7 @@ main(int argc, char **argv)
 	CPXNETptr	net = NULL;
 	CPXLPptr	lp  = NULL;
 	int status = 0;
+	int i, j;
 
 	/* Problem Info Variables */
 	int narcs, nnodes;
@@ -40,7 +48,7 @@ main(int argc, char **argv)
 	env = CPXopenCPLEX(&status);
 	if(!env) {
 		char errmsg[CPXMESSAGEBUFSIZE];
-		CPXgeterrorstring(env, status, ermsg);
+		CPXgeterrorstring(env, status, errmsg);
 		fprintf(stderr, "Unable to start CPLEX, %d, %s\n", status, errmsg);
 		goto TERMINATE;
 	}
@@ -71,11 +79,29 @@ main(int argc, char **argv)
 	}
 
 	if(net) {
-		status = CPXcopynettolep(env, lp, net);
+		status = CPXcopynettolp(env, lp, net);
 		if(status) {
 			fprintf(stderr, "Unable to copy NET object to LP object.\n");
 			goto TERMINATE;
 		}
+	}
+
+
+
+	/* Set the CPLEX parameters, by the following order:
+	 * - Set CPLEX screen output ON
+	 * - Turn off the CPLEX aggregator
+	 */
+	status = CPXsetintparam(env, CPX_PARAM_SCRIND, CPX_ON);
+	if(status) {
+		fprintf(stderr, "Unable to set screen output.\n");
+		goto TERMINATE;
+	}
+
+	status = CPXsetintparam(env, CPX_PARAM_AGGIND, 0);
+	if(status) {
+		fprintf(stderr, "Unable to set aggregator fill to 0.\n");
+		goto TERMINATE;
 	}
 
 
@@ -119,7 +145,7 @@ main(int argc, char **argv)
 		goto TERMINATE;
 	}
 
-	status = CPXgetbase(env, lp, cstat, rstat);
+	status = CPXgetbase(env, lp , cstat, rstat);
 	if(status) {
 		fprintf(stderr, "Unable to get solution basis.\n");
 		goto TERMINATE;
@@ -132,14 +158,29 @@ main(int argc, char **argv)
 	fprintf(stdout, "\nARCS:\n");
 	for(i = 0; i < narcs; i++) {
 		fprintf(stdout, "Arc %d: ", i);
-		fprintf(stdout, "Value: %f ", x[i]);
-		fprintf(stdout, "Reduced Costs: %f ", dj[i]);
+		fprintf(stdout, "Value: %10f ", x[i]);
+		fprintf(stdout, "Reduced Costs: %10f ", dj[i]);
 		/* Print the basis status */
 		if(cstat[i] == CPX_BASIC) {
 			fprintf(stdout, " AT BASIS\n");
 		} else if(cstat[i] == CPX_AT_LOWER) {
 			fprintf(stdout, " AT LOWER\n");
 		} else if(cstat[i] == CPX_AT_UPPER) {
+			fprintf(stdout, " AT UPPER\n");
+		}
+	}
+
+	fprintf(stdout, "\nNODES:\n");
+	for(j = 0; j < nnodes; j++) {
+		fprintf(stdout, "Node %d: ", j);
+		fprintf(stdout, "PI: %10f ", pi[j]);
+		fprintf(stdout, "Slack: %10f", slack[j]);
+		/* Print the basis status */
+		if(rstat[j] == CPX_BASIC) {
+			fprintf(stdout, " AT BASIS\n");
+		} else if(rstat[j] == CPX_AT_LOWER) {
+			fprintf(stdout, " AT LOWER\n");
+		} else if(rstat[j] == CPX_AT_UPPER) {
 			fprintf(stdout, " AT UPPER\n");
 		}
 	}
@@ -159,6 +200,11 @@ TERMINATE:
 	status = CPXNETfreeprob(env, &net);
 	if(net) {
 		fprintf(stderr, "Unable to free NET problem object.\n");
+	}
+
+	status = CPXfreeprob(env, &lp);
+	if(lp) {
+		fprintf(stderr, "Unable to free LP problem object.\n");
 	}
 
 	/* Close CPLEX */
