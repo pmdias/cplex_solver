@@ -5,12 +5,33 @@
 #include <string.h>
 
 /*** Constants Definitions ***/
-#define SOLVER_NETWORK_SIMPLEX	1
-#define SOLVER_LP_SIMPLEX		2
-#define SOLVER_HYBRID_SIMPLEX	3
+
+
+
 
 /*** Forward Declarations ***/
 static void free_and_null(void **);
+
+
+
+/*** Data Structures ***/
+struct network_basis {
+	int * astat; /* Basis status for problem arcs */
+	int * nstat; /* Basis status for problem nodes */
+};
+
+struct network_solution {
+	int netstat;	/* Solution Status */
+	double objval;	/* Objective value of solution */
+	double * x;		/* Flow values */
+	double * pi;	/* Pi values for nodes */
+	double * dj;	/* Reduced costs for arcs */
+	double * slack;	/* Slack values for nodes */
+};
+
+
+
+
 
 /*** Main Routine ***/
 int
@@ -19,7 +40,7 @@ main(int argc, char **argv)
 	/* Main Variables */
 	CPXENVptr	env = NULL;
 	CPXNETptr	net = NULL;
-	CPXLPptr	lp  = NULL;
+	CPXLPptr	lp = NULL;
 	int status = 0;
 	int i, j;
 
@@ -27,6 +48,7 @@ main(int argc, char **argv)
 	int narcs, nnodes;
 
 	/* Solution Variables */
+	int itcnt;
 	int solstat;
 	double objval;
 	double * x     = NULL;
@@ -39,10 +61,7 @@ main(int argc, char **argv)
 	int * rstat = NULL;
 
 	/* Sanity Check to Command Line Args */
-	if(argc != 2) {
-		fprintf(stderr, "Usage: ./solver [FILE]\n");
-		goto TERMINATE;
-	}
+	
 
 	/* Initialize CPLEX Environment */
 	env = CPXopenCPLEX(&status);
@@ -68,43 +87,51 @@ main(int argc, char **argv)
 	}
 
 
-
-	/* Create the LP objects that are going to be used in the optimization stage
-	 * and copy their data from the NET object.
-	 */
-	lp = CPXcreateprob(env, &status, "network_lp");
+	/* Copy to LP */
+	lp = CPXcreateprob(env, &status, argv[1]);
 	if(!lp) {
 		fprintf(stderr, "Unable to create LP problem object.\n");
 		goto TERMINATE;
 	}
 
-	if(net) {
-		status = CPXcopynettolp(env, lp, net);
-		if(status) {
-			fprintf(stderr, "Unable to copy NET object to LP object.\n");
-			goto TERMINATE;
-		}
+	status = CPXcopynettolp(env, lp, net);
+	if(status) {
+		fprintf(stderr, "Unable to copy problem.\n");
+		goto TERMINATE;
 	}
-
-
 
 	/* Set the CPLEX parameters, by the following order:
 	 * - Set CPLEX screen output ON
 	 * - Turn off the CPLEX aggregator
+	 * - Set iteration limit to 1
 	 */
 	status = CPXsetintparam(env, CPX_PARAM_SCRIND, CPX_ON);
 	if(status) {
 		fprintf(stderr, "Unable to set screen output.\n");
 		goto TERMINATE;
 	}
-
+/*
 	status = CPXsetintparam(env, CPX_PARAM_AGGIND, 0);
 	if(status) {
 		fprintf(stderr, "Unable to set aggregator fill to 0.\n");
 		goto TERMINATE;
 	}
+*/
+	status = CPXsetintparam(env, CPX_PARAM_ITLIM, 1);
+	if(status) {
+		fprintf(stderr, "Unable to set iteration limit to 1.\n");
+		goto TERMINATE;
+	}
 
 
+	/* Read basis file */
+	if(argc == 3) {
+		status = CPXreadcopybase(env, lp, argv[2]);
+		if(status) {
+			fprintf(stderr, "Error reading basis.\n");
+			goto TERMINATE;
+		}
+	}
 
 	/* Optimization Stage */
 	status = CPXprimopt(env, lp);
@@ -114,10 +141,36 @@ main(int argc, char **argv)
 	}
 
 
+
+//------------------------------------------------------------------------------	
+	//while(/* Control variable to assert solution status */) {
+		/* 1) Check if a base exists and if yes, pass it to CPLEX */
+		//if(/* Base existance boolean */) {
+			/* Pass it to CPLEX */
+			
+		//}
+		
+		/* 2) CPLEX performs an iteration only */
+		//status = CPXNETprimopt(env, net);
+		//if(status) {
+			//fprintf(stderr, "Unable to optimize problem.\n");
+			//goto TERMINATE;
+		//}
+		
+		/* 3) Get the new base from CPLEX NET object and store it in memory */
+		
+		
+
+	//}
+//------------------------------------------------------------------------------
+
+
+
 	/* Get Solution Data:
 	 * Alloc memory for the solution arrays
 	 * Get the solution data using CPXsolution routine
 	 */
+	itcnt = CPXgetitcnt(env, lp);
 	narcs = CPXgetnumcols(env, lp);
 	nnodes = CPXgetnumrows(env, lp);
 
@@ -139,13 +192,22 @@ main(int argc, char **argv)
 		goto TERMINATE;
 	}
 
+	memset(rstat, 0, nnodes * sizeof(int));
+	memset(cstat, 0, narcs * sizeof(int));
+
 	status = CPXsolution(env, lp, &solstat, &objval, x, pi, slack, dj);
 	if(status) {
 		fprintf(stderr, "Unable to get solution.\n");
 		goto TERMINATE;
 	}
 
-	status = CPXgetbase(env, lp , cstat, rstat);
+	status = CPXmbasewrite(env, lp, "basis");
+	if(status) {
+		fprintf(stderr, "Unable to print current basis to file\n");
+		goto TERMINATE;
+	}
+
+	status = CPXgetbase(env, lp, cstat, rstat);
 	if(status) {
 		fprintf(stderr, "Unable to get solution basis.\n");
 		goto TERMINATE;
@@ -154,6 +216,10 @@ main(int argc, char **argv)
 	/* Print Solution Data */
 	fprintf(stdout, "Solution Status: %d\n", solstat);
 	fprintf(stdout, "Solution Value: %f\n", objval);
+
+	fprintf(stdout, "Number of arcs: %d\n", narcs);
+	fprintf(stdout, "Number of nodes: %d\n", nnodes);
+	fprintf(stdout, "Iteration Count: %d\n", itcnt);
 
 	fprintf(stdout, "\nARCS:\n");
 	for(i = 0; i < narcs; i++) {
@@ -200,11 +266,6 @@ TERMINATE:
 	status = CPXNETfreeprob(env, &net);
 	if(net) {
 		fprintf(stderr, "Unable to free NET problem object.\n");
-	}
-
-	status = CPXfreeprob(env, &lp);
-	if(lp) {
-		fprintf(stderr, "Unable to free LP problem object.\n");
 	}
 
 	/* Close CPLEX */
