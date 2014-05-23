@@ -1,0 +1,9 @@
+1) Calculate the Minimum Cost Flow for Objective Function 1
+2) Calculate the Minimum Cost Flow for objective Function 2
+3) Calculate the solution for Objective Function 1 and 2 using a
+   perturbation to achieve an extreme non-dominated solution and
+   compare the value against the objective value in 1)
+
+   		Z(x) = 0.99z1(x) + 0.01z2(x)
+
+4) Iterate getting other solutions until value in 2) is reached

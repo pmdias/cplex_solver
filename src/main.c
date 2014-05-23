@@ -1,35 +1,23 @@
+/*** CPLEX Interface ***/
 #include <ilcplex/cplex.h>
 
+/*** System Interfaces ***/
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 
+/*** Public Interfaces ***/
+#include "network.h"
+
+
 /*** Constants Definitions ***/
-
-
+static SOLUTION * solution1 = NULL;
+static SOLUTION * solution2 = NULL;
 
 
 /*** Forward Declarations ***/
 static void free_and_null(void **);
 static double objective_value(double *, double *, int);
-
-
-/*** Data Structures ***/
-typedef struct network_basis {
-	int * astat; /* Basis status for problem arcs */
-	int * nstat; /* Basis status for problem nodes */
-} net_basis;
-
-typedef struct network_solution {
-	int netstat;	/* Solution Status */
-	double objval;	/* Objective value of solution */
-	double * x;		/* Flow values */
-	double * pi;	/* Pi values for nodes */
-	double * dj;	/* Reduced costs for arcs */
-	double * slack;	/* Slack values for nodes */
-} net_solution;
-
-
 
 
 
@@ -52,21 +40,11 @@ main(int argc, char **argv)
 	double * costs1 = NULL;
 	double * costs2 = NULL;
 
-
-	/* Solution Variables */
-	int solstat = 0;
-	double objval = 0.0;
-	double * x     = NULL;
-	double * pi    = NULL;
-	double * dj    = NULL;
-	double * slack = NULL;
-
-	/* Basis Variables */
-	int * cstat = NULL;
-	int * rstat = NULL;
-
 	/* Sanity Check to Command Line Args */
-	
+	if(argc != 3) {
+		fprintf(stderr, "Usage: ./solver [NETWORK1] [NETWORK2]\n");
+		goto TERMINATE;
+	}
 
 	/*** Initialize CPLEX Environment ***/
 	env1 = CPXopenCPLEX(&status);
@@ -149,11 +127,7 @@ main(int argc, char **argv)
 
 
 
-	/* Set the CPLEX parameters, by the following order:
-	 * - Set CPLEX screen output ON
-	 * - Turn off the CPLEX aggregator
-	 * - Set iteration limit to 1
-	 */
+	/* Set CPLEX Parameters */
 	status = CPXsetintparam(env1, CPX_PARAM_SCRIND, CPX_OFF);
 	if(status) {
 		fprintf(stderr, "Unable to set screen output.\n");
@@ -178,25 +152,22 @@ main(int argc, char **argv)
 		goto TERMINATE;
 	}
 
+
+
+
 /*** ********************** MEMORY ALLOCATION STAGE ************************ ***/
 	narcs = CPXgetnumcols(env1, lp1);
 	nnodes = CPXgetnumrows(env1, lp1);
 
-	x = malloc(narcs * sizeof(double));
-	dj = malloc(narcs * sizeof(double));
-	pi = malloc(nnodes * sizeof(double));
-	slack = malloc(nnodes * sizeof(double));
-
-	if(!x || !dj | !pi || !slack) {
-		fprintf(stderr, "Error allocating array memory.\n");
+	solution1 = create_network_solution(narcs, nnodes);
+	if(!solution1) {
+		fprintf(stderr, "Error on solution 1 alloc.\n");
 		goto TERMINATE;
 	}
-
-	cstat = malloc(narcs * sizeof(double));
-	rstat = malloc(nnodes * sizeof(double));
-
-	if(!cstat || !rstat) {
-		fprintf(stderr, "Error allocating basis array memory.\n");
+	
+	solution2 = create_network_solution(narcs, nnodes);
+	if(!solution2) {
+		fprintf(stderr, "Error on solution 2 alloc.\n");
 		goto TERMINATE;
 	}
 
@@ -205,7 +176,7 @@ main(int argc, char **argv)
 	double obj2_val = 0.0;
 	narcs = CPXgetnumcols(env1, lp1);
 	
-	while(solstat != 1) {
+	while(solution1->solstat != 1) {
 		/* Read basis file if not in initial iteration */
 		if(itcnt != 0) {
 			status = CPXreadcopybase(env1, lp1, "basis");
@@ -223,7 +194,8 @@ main(int argc, char **argv)
 		}
 
 		/* Get objective function 1 solution */
-		status = CPXsolution(env1, lp1, &solstat, &objval, x, pi, slack, dj);
+		status = CPXsolution(env1, lp1, &(solution1->solstat), &(solution1->objval), 
+		                     solution1->x, solution1->pi, solution1->slack, solution1->dj);
 		if(status) {
 			fprintf(stderr, "Unable to get solution.\n");
 			goto TERMINATE;
@@ -231,14 +203,14 @@ main(int argc, char **argv)
 
 		fprintf(stdout, "\n\n------------------------------------------------------\n");
 		fprintf(stdout, "Iteration: %d\n", itcnt);
-		fprintf(stdout, "Objective Function 1: %lf\n", objval);
+		fprintf(stdout, "Objective Function 1: %lf\n", solution1->objval);
 		int i, j;
 		for(i = 0; i < narcs; i++) {
-			fprintf(stdout, "X: %lf\tDJ: %lf\n", x[i], dj[i]);
+			fprintf(stdout, "X: %lf\tDJ: %lf\n", solution1->x[i], solution1->dj[i]);
 		}
 
 		for(j = 0; j < nnodes; j++) {
-			fprintf(stdout, "PI: %lf\tSLACK: %lf\n", pi[j], slack[j]);
+			fprintf(stdout, "PI: %lf\tSLACK: %lf\n", solution1->pi[j], solution1->slack[j]);
 		}
 
 		/* Get objective value of function 2 */
@@ -254,7 +226,7 @@ main(int argc, char **argv)
 			goto TERMINATE;
 		}
 
-		obj2_val = objective_value(costs2, x, narcs);
+		obj2_val = objective_value(costs2, solution1->x, narcs);
 
 		fprintf(stdout, "Function 2: %lf\n", obj2_val);
 
@@ -305,13 +277,8 @@ main(int argc, char **argv)
 TERMINATE:
 
 	/* Free alloc'd memory */
-	free_and_null((void *) &x);
-	free_and_null((void *) &pi);
-	free_and_null((void *) &dj);
-	free_and_null((void *) &slack);
-
-	free_and_null((void *) &rstat);
-	free_and_null((void *) &cstat);
+	free_and_null_solution(&solution1);
+	free_and_null_solution(&solution2);
 
 	free_and_null((void *) &costs1);
 	free_and_null((void *) &costs2);
