@@ -50,9 +50,13 @@ $(BUILD)/main.o: $(SRC)/main.c
 	@echo "Compiling src/main.c... "
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(BUILD)/network.o: $(SRC)/network.c
-	@echo "Compiling src/network.c... "
-	$(CC) $(CFLAGS) -c -o $@ $<
+#$(BUILD)/network.o: $(SRC)/network.c
+#	@echo "Compiling src/network.c... "
+#	$(CC) $(CFLAGS) -c -o $@ $<
+
+#$(BUILD)/perturbation.o: $(SRC)/perturbation.c
+#	@echo "Compiling src/perturbation.c... "
+#	$(CC) $(CFLAGS) -c -o $@ $<
 
 clean:
 	@echo "Cleaning... "
